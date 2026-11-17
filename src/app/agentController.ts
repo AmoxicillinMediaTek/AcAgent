@@ -23,6 +23,13 @@ import type { Task, TaskStatus } from "../tasks/types";
 import { openAcodeUri } from "../platform/deviceImage";
 import { collectPromptImages } from "../platform/promptImages";
 import { MutationGate } from "../permissions/mutationGate";
+import {
+  finalizeMcpServer,
+  upsertMcpServer,
+  type McpServerConfig,
+  type McpServerDraft,
+} from "../mcp/config";
+import { McpManager } from "../mcp/manager";
 import { closeAuthTab, openAuthTab } from "../platform/authTab";
 import { PortableCredentialStore } from "../platform/credentials";
 import { SIGN_IN_SUSPENDED } from "../providers/portableOAuth";
@@ -53,6 +60,7 @@ export class AgentController {
   readonly credentials: PortableCredentialStore;
   readonly providers: ProviderRegistry;
   readonly extensions = new ExtensionRegistry();
+  readonly mcp: McpManager;
   #sessionStore = new ChatStore();
   #sessions = new Map<string, AgentSession>();
   #sessionListeners = new Map<string, () => void>();
@@ -63,6 +71,7 @@ export class AgentController {
   #chatSelection: Promise<void> = Promise.resolve();
   #authAbort?: AbortController;
   #authTabAbort?: AbortController;
+  #toolRefreshQueued = false;
   #startup?: Promise<void>;
   #authPrompt?: { resolve(value: string): void; reject(error: Error): void };
   #state: PublicAgentState;
@@ -77,6 +86,14 @@ export class AgentController {
       createModelCatalogStore(ctx),
       () => this.settings.value.customEndpoints,
     );
+    this.mcp = new McpManager({
+      // MCP tools are numerous and optional: tool_search loads them when a task needs one.
+      register: (tool, options) => this.registerTool(tool, options),
+      onChange: (statuses) => {
+        this.#state.mcp = statuses;
+        this.#emit();
+      },
+    });
     this.#state = {
       status: "booting",
       messages: [],
@@ -91,10 +108,12 @@ export class AgentController {
       commands: BUILT_IN_SLASH_COMMANDS,
       tasks: [],
       edits: {},
+      mcp: [],
     };
     this.settings.subscribe(() => {
       this.providers.syncCustomEndpoints();
       this.#activeSession()?.applySettings();
+      void this.mcp.sync(this.settings.value.mcpServers);
       this.#emit();
     });
     this.#hostUnsubscribers = [
@@ -116,6 +135,7 @@ export class AgentController {
       models: [...this.#state.models],
       commands: [...this.#state.commands],
       tasks: [...this.#state.tasks],
+      mcp: [...this.#state.mcp],
       settings: { ...this.#state.settings },
     };
   }
@@ -211,6 +231,7 @@ export class AgentController {
     }
     const { providerId, modelId } = this.#model();
     void this.#refreshProviderModel(providerId, modelId);
+    void this.mcp.sync(this.settings.value.mcpServers);
   }
 
   async send(
@@ -872,11 +893,21 @@ export class AgentController {
    */
   registerTool(tool: ToolRegistration, options?: { exposure?: ToolExposure }): () => void {
     const unregister = this.extensions.registerTool(tool, options);
-    for (const session of this.#sessions.values()) session.refreshTools();
+    this.#scheduleToolRefresh();
     return () => {
       unregister();
-      for (const session of this.#sessions.values()) session.refreshTools();
+      this.#scheduleToolRefresh();
     };
+  }
+
+  /** One refresh per tick: a server registering 30 tools would otherwise rebuild every chat 30 times. */
+  #scheduleToolRefresh(): void {
+    if (this.#toolRefreshQueued) return;
+    this.#toolRefreshQueued = true;
+    queueMicrotask(() => {
+      this.#toolRefreshQueued = false;
+      for (const session of this.#sessions.values()) session.refreshTools();
+    });
   }
 
   registerProvider(provider: Provider): () => void {
@@ -891,12 +922,38 @@ export class AgentController {
     return this.extensions.registerFeature(feature);
   }
 
+  /** Adds or updates an MCP server; its tools appear once the server answers `tools/list`. */
+  saveMcpServer(draft: McpServerDraft): McpServerConfig {
+    const server = finalizeMcpServer(draft, this.settings.value.mcpServers);
+    this.settings.update({ mcpServers: upsertMcpServer(this.settings.value.mcpServers, server) });
+    return server;
+  }
+
+  removeMcpServer(id: string): void {
+    this.settings.update({
+      mcpServers: this.settings.value.mcpServers.filter((server) => server.id !== id),
+    });
+  }
+
+  setMcpServerEnabled(id: string, enabled: boolean): void {
+    this.settings.update({
+      mcpServers: this.settings.value.mcpServers.map((server) =>
+        server.id === id ? { ...server, enabled } : server,
+      ),
+    });
+  }
+
+  async retryMcpServer(id: string): Promise<void> {
+    await this.mcp.retry(id, this.settings.value.mcpServers);
+  }
+
   async dispose(): Promise<void> {
     closeAuthTab();
     this.#authTabAbort?.abort();
     // Keep a pending browser sign-in so the next plugin load can still receive its callback.
     this.#authAbort?.abort(SIGN_IN_SUSPENDED);
     for (const unsubscribe of this.#hostUnsubscribers.splice(0)) unsubscribe();
+    await this.mcp.dispose();
     await this.#disposeAllSessions();
     this.changes.clear();
   }

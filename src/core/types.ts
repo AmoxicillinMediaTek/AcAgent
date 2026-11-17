@@ -12,6 +12,8 @@ import type { QuestionnairePrompt } from "../ask/types";
 import type { PermissionMode } from "./schema";
 import type { SlashCommand } from "./slashCommands";
 import type { CustomEndpoint } from "../providers/customEndpoints";
+import type { McpServerConfig } from "../mcp/config";
+import type { McpServerStatus } from "../mcp/manager";
 import type { Task } from "../tasks/types";
 
 /** Built-ins use known IDs; extensions may register any stable provider ID. */
@@ -56,6 +58,8 @@ export type AgentSettings = {
   activeChatId: string;
   customModels: Record<string, string[]>;
   customEndpoints: CustomEndpoint[];
+  /** Model Context Protocol servers whose tools the agent may call. */
+  mcpServers: McpServerConfig[];
 };
 
 /** A compaction summary in the transcript; Pi stores it as a `pi.compaction` entry. */
@@ -199,6 +203,7 @@ export type PublicAgentState = {
   recovery?: RunRecovery;
   retry?: RunRetry;
   activeChatId?: string;
+  mcp: McpServerStatus[];
   authFlow?: {
     providerId: ProviderId;
     status: "waiting" | "connecting" | "connected" | "error";

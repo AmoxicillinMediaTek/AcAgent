@@ -1,3 +1,9 @@
+# 0.4.0
+
+- MCP servers: connect Model Context Protocol servers over Streamable HTTP under **MCP servers** in the composer chip, with optional JSON headers for authentication. Their tools are registered as `mcp_<server>_<tool>` and stay deferred until `tool_search` loads one, so large servers cost no tokens per request. Each server shows its state, tool count and error, with on/off and retry.
+- Registering many tools at once (an MCP server with dozens) rebuilds each chat's tools once per tick instead of once per tool.
+- `read_mcp` lets the agent see which MCP servers are connected, their state and errors, and the tools each one offers.
+
 # 0.3.0
 
 - Each chat keeps its own provider, model, and thinking level, so chats in different projects or tabs can run on different providers at once, such as two local endpoints. Picking a model changes only the open chat, and new chats start on your latest choice. Existing chats keep the model they last used.

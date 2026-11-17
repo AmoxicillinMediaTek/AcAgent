@@ -18,6 +18,8 @@ import type { AgentController, CommandPanelData } from "../app/agentController";
 import type { ComposerRequest } from "../app/agentActions";
 import type { Mailbox } from "../core/events";
 import { PERMISSION_MODES } from "../core/schema";
+import type { McpServerConfig } from "../mcp/config";
+import type { McpServerStatus } from "../mcp/manager";
 import type {
   ChatSummary,
   MutationDecision,
@@ -1778,7 +1780,9 @@ function ConfigSheet({
   onClose: () => void;
   onOpenPiSettings: () => void;
 }) {
-  const [view, setView] = useState<"main" | "providers" | "models" | "endpoint">(initialView);
+  const [view, setView] = useState<"main" | "providers" | "models" | "endpoint" | "mcp">(
+    initialView,
+  );
   const [editing, setEditing] = useState<CustomEndpoint | "new" | null>(null);
   const [error, setError] = useState("");
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -1859,6 +1863,23 @@ function ConfigSheet({
                     onSaved={() => go("models")}
                     onRemoved={() => go("providers")}
                   />
+                </div>
+              </>
+            ) : view === "mcp" ? (
+              <>
+                <header class="sheet-header with-back">
+                  <button
+                    type="button"
+                    class="sheet-back"
+                    onClick={() => go("main")}
+                    aria-label="Back"
+                  >
+                    <ChevronLeft size={20} strokeWidth={2} />
+                  </button>
+                  <h2>MCP servers</h2>
+                </header>
+                <div class="picker-body">
+                  <McpServersPanel controller={controller} state={state} />
                 </div>
               </>
             ) : view === "models" ? (
@@ -1944,6 +1965,13 @@ function ConfigSheet({
                   <span class="config-nav-value">{modelName}</span>
                   <ChevronRight size={18} strokeWidth={2} aria-hidden="true" />
                 </button>
+                <button type="button" class="config-nav" onClick={() => go("mcp")}>
+                  <div>
+                    <b>MCP servers</b>
+                    <small>{mcpSummary(state)}</small>
+                  </div>
+                  <ChevronRight size={18} strokeWidth={2} aria-hidden="true" />
+                </button>
                 <button type="button" class="config-nav" onClick={onOpenPiSettings}>
                   <div>
                     <b>Pi settings</b>
@@ -1957,6 +1985,173 @@ function ConfigSheet({
         </>
       )}
     </Sheet>
+  );
+}
+
+function mcpSummary(state: PublicAgentState): string {
+  const total = state.settings.mcpServers.length;
+  if (!total) return "Add a Model Context Protocol server";
+  const ready = state.mcp.filter((server) => server.state === "ready");
+  const tools = ready.reduce((sum, server) => sum + server.toolCount, 0);
+  return `${ready.length} of ${total} connected · ${tools} tool${tools === 1 ? "" : "s"}`;
+}
+
+function mcpStatusLine(server: McpServerConfig, status?: McpServerStatus): string {
+  if (!server.enabled) return "Off";
+  if (!status || status.state === "connecting") return "Connecting…";
+  if (status.state === "error") return status.error ?? "Could not connect";
+  if (status.state === "ready")
+    return status.toolCount
+      ? `${status.toolCount} tool${status.toolCount === 1 ? "" : "s"} ready`
+      : "Connected, but it offers no tools";
+  return "Off";
+}
+
+function McpServersPanel({
+  controller,
+  state,
+}: {
+  controller: AgentController;
+  state: PublicAgentState;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [headers, setHeaders] = useState("");
+  const [error, setError] = useState("");
+  const servers = state.settings.mcpServers;
+  const statuses = new Map(state.mcp.map((status) => [status.id, status]));
+  const add = () => {
+    setError("");
+    try {
+      controller.saveMcpServer({ name, url, headers });
+      setName("");
+      setUrl("");
+      setHeaders("");
+      setAdding(false);
+      showToast("MCP server added");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+  return (
+    <>
+      <p class="custom-model-hint">
+        Model Context Protocol servers expose extra tools. The agent loads them with tool_search
+        when a task needs one.
+      </p>
+      {servers.map((server) => {
+        const status = statuses.get(server.id);
+        const failure = status?.state === "error";
+        return (
+          <div class="mcp-server" key={server.id}>
+            <label class="setting-row">
+              <span>
+                <b>{server.name}</b>
+                <small class={failure ? "mcp-server-error" : undefined}>
+                  {mcpStatusLine(server, status)}
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                checked={server.enabled}
+                aria-label={`Enable ${server.name}`}
+                onChange={(event) =>
+                  controller.setMcpServerEnabled(server.id, event.currentTarget.checked)
+                }
+              />
+            </label>
+            <div class="mcp-server-foot">
+              <code>{server.url}</code>
+              <div class="mcp-server-actions">
+                {failure && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void controller
+                        .retryMcpServer(server.id)
+                        .catch((caught) => showToast(String(caught)))
+                    }
+                  >
+                    Retry
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-label={`Remove ${server.name}`}
+                  onClick={() => {
+                    controller.removeMcpServer(server.id);
+                    showToast("MCP server removed");
+                  }}
+                >
+                  <Trash2 size={14} strokeWidth={2} />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {adding ? (
+        <form
+          class="endpoint-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            add();
+          }}
+        >
+          <label class="field-label">
+            Name
+            <input
+              value={name}
+              placeholder="Docs search"
+              autoCapitalize="words"
+              onInput={(event) => setName(event.currentTarget.value)}
+            />
+          </label>
+          <label class="field-label">
+            Server URL
+            <input
+              value={url}
+              placeholder="https://example.com/mcp"
+              inputMode="url"
+              autoCapitalize="none"
+              autoCorrect="off"
+              onInput={(event) => setUrl(event.currentTarget.value)}
+            />
+          </label>
+          <label class="field-label">
+            Headers (JSON, optional)
+            <textarea
+              value={headers}
+              placeholder={'{"Authorization": "Bearer …"}'}
+              autoCapitalize="none"
+              autoCorrect="off"
+              onInput={(event) => setHeaders(event.currentTarget.value)}
+            />
+          </label>
+          {error && <p class="custom-model-error">{error}</p>}
+          <div class="endpoint-actions">
+            <button class="endpoint-save" type="submit" disabled={!name.trim() || !url.trim()}>
+              Add server
+            </button>
+            <button
+              class="endpoint-remove"
+              type="button"
+              onClick={() => {
+                setAdding(false);
+                setError("");
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button class="settings-action" type="button" onClick={() => setAdding(true)}>
+          <Plus size={15} strokeWidth={2} /> Add MCP server
+        </button>
+      )}
+    </>
   );
 }
 

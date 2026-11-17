@@ -184,12 +184,27 @@ The `codemode` tool is on by default (**Pi settings → Codemode** turns it off)
 - `todo_write`: a checklist for multi-step work
 - `ask_user_question`: ask you to pick between options instead of guessing
 - `tool_search`: load a deferred tool (see below)
+- `read_mcp`: list the MCP servers that are connected and the tools each one offers
 
 **Deferred tools**
 
 Tools the agent seldom needs are not sent with every request: the file operation tools and `ask_user_question`. The system prompt names them, and the agent loads one with `tool_search` when it needs it. A loaded tool stays available on that chat branch until a compaction summarizes away both its loading and its use; then it is hidden again at the next prompt and can be reloaded. Codemode scripts can call deferred tools without loading them. This saves about 740 tokens per request on folders without `bash` and about 180 on Terminal folders.
 
 - `load_skill`: load a skill into context
+
+## MCP servers
+
+The agent can call tools from [Model Context Protocol](https://modelcontextprotocol.io) servers. Open the composer chip → **MCP servers**, then **Add MCP server** with:
+
+- **Name** — what the agent and the tool names call it.
+- **Server URL** — the MCP endpoint, often `https://example.com/mcp`. Streamable HTTP is used; stdio servers need a process, which Acode does not give plugins.
+- **Headers (JSON, optional)** — authentication, for example `{"Authorization": "Bearer …"}`.
+
+Each server shows its state: connecting, ready with its tool count, off, or the error it hit. Use **Retry** after fixing a URL or header, and the checkbox to keep a server configured but disconnected. Up to 20 servers.
+
+Server tools are exposed as `mcp_<server>_<tool>` and stay deferred: the system prompt names them and the agent loads one with `tool_search` when a task needs it, so a server with many tools costs nothing until then. `read_mcp` tells the agent which servers are connected, their state, and the tools each one offers. The server is asked for its tools when it connects; changing its settings reconnects it.
+
+MCP tools run on the server's side: they are not confined to the open folder and the permission modes do not gate them, the same as web tools. A tool that changes files does so through the server, not through the editor, so Undo does not cover it.
 
 ## Permissions
 

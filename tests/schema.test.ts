@@ -39,6 +39,9 @@ test("compaction defaults come from Pi instead of a local copy", () => {
   expect(DEFAULT_SETTINGS.showTaskTray).toBe(true);
   expect(parseSettings({}).customEndpoints).toEqual([]);
   expect(DEFAULT_SETTINGS.customEndpoints).toEqual([]);
+  expect(parseSettings({}).mcpServers).toEqual([]);
+  expect(DEFAULT_SETTINGS.mcpServers).toEqual([]);
+  expect(parseSettings({ mcpServers: "docs" }).mcpServers).toEqual([]);
 });
 
 test("retired Acode selections fall back to OpenRouter without changing other settings", () => {

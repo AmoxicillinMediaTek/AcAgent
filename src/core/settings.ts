@@ -1,4 +1,5 @@
 import { DEFAULT_COMPACTION_POLICY } from "@earendil-works/pi-durable";
+import { sanitizeMcpServers } from "../mcp/config";
 import { sanitizeCustomEndpoints } from "../providers/customEndpoints";
 import { parseSettings } from "./schema";
 import type { AgentSettings } from "./types";
@@ -38,6 +39,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   activeChatId: "",
   customModels: {},
   customEndpoints: [],
+  mcpServers: [],
 };
 
 export class SettingsStore {
@@ -55,6 +57,10 @@ export class SettingsStore {
       customEndpoints: this.#value.customEndpoints.map((endpoint) => ({
         ...endpoint,
         models: [...endpoint.models],
+      })),
+      mcpServers: this.#value.mcpServers.map((server) => ({
+        ...server,
+        headers: { ...server.headers },
       })),
       globalSkillRoots: [...this.#value.globalSkillRoots],
     };
@@ -96,6 +102,7 @@ export class SettingsStore {
       ...DEFAULT_SETTINGS,
       ...parsed,
       customEndpoints: sanitizeCustomEndpoints(parsed.customEndpoints),
+      mcpServers: sanitizeMcpServers(parsed.mcpServers),
     };
   }
 }

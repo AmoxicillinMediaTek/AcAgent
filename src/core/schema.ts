@@ -99,6 +99,9 @@ const settingsFields = {
   customEndpoints: ((value) => (Array.isArray(value) && value.length <= 20 ? value : [])) as Field<
     unknown[]
   >,
+  mcpServers: ((value) => (Array.isArray(value) && value.length <= 20 ? value : [])) as Field<
+    unknown[]
+  >,
 };
 
 type ParsedSettings = {
